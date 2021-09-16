@@ -15,11 +15,11 @@ to access the values at different point in time if needed. The class is a simple
 
 
 class Node:
-    def __init__(self, symbols=[], contraints=[], values=[], eq_result_parent=numpy.Inf, eq_result=0,
+    def __init__(self, symbols=[], constraints=[], values=[], eq_result_parent=numpy.Inf, eq_result=0,
                  objective_function=None, left_child=None,
                  right_child=None):
         self.symbols = symbols
-        self.contraints = contraints
+        self.constraints = constraints
         self.values = values
         self.eq_result_parent = eq_result_parent
         self.eq_result = eq_result
@@ -34,7 +34,7 @@ class Node:
         return self.symbols
 
     def __get_constraints__(self):
-        return self.contraints
+        return self.constraints
 
     def __get_values__(self):
         return self.values
