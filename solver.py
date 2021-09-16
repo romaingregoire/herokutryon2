@@ -33,7 +33,7 @@ class Node:
     def __get_symbols__(self):
         return self.symbols
 
-    def __get_contraints__(self):
+    def __get_constraints__(self):
         return self.contraints
 
     def __get_values__(self):
@@ -60,8 +60,8 @@ class Node:
     def __set_symbols__(self, symbols):
         self.symbols = symbols
 
-    def __set_contraints__(self, contraints):
-        self.contraints = contraints
+    def __set_constraints__(self, constraints):
+        self.constraints = constraints
 
     def __set_values__(self, values):
         self.values = values
@@ -103,24 +103,23 @@ class Node:
         return best_parameter"""
 
 
-def get_closest(value, symbols, chosen):
-    left, right = -numpy.Inf, numpy.Inf
-    if symbols[chosen][1] is None:
+def get_closest(value, symbols, index_variable):
+    left, right = numpy.Inf, numpy.Inf
+    if symbols[index_variable][1] is None:
         """case without no constraints to add to this value"""
         return None, None
-    elif len(symbols[chosen][1]) > 0:
+    elif len(symbols[index_variable][1]) > 0:
         """case where the user is passing a vector in parameter"""
-        for vector_values in symbols[chosen][1]:
+        for vector_values in symbols[index_variable][1]:
             if vector_values < 0:
                 raise ValueError("This subexpression you are trying to create in not dgp")
-            if (value - left) > (value - vector_values):
+            if abs(value - left) > abs(value - vector_values) and vector_values < value:
                 left = vector_values
-            if (right - value) > (vector_values - value):
+            if abs(value - right) > abs(vector_values - value) and vector_values > value:
                 right = vector_values
-    elif len(symbols[chosen][1] == 0):
+    elif len(symbols[index_variable][1] == 0):
         """case with general constraints +1 -1"""
-        if math.floor(value) - 1 < 0:
-            left = None
+        left = math.floor(value)
         right = math.ceil(value)
     return left, right
 
@@ -138,13 +137,13 @@ def new_constraints(current_node, chosen):
     new_left_constraints = None
     if not (left_closest_value is None):
         new_left_constraints = left_closest_value >= left_copy_symbols[chosen][0]
-    new_right_constraints = math.ceil(current_node.__get_values__()[chosen]) <= right_copy_symbols[chosen][0]
+    new_right_constraints = right_closest_value <= right_copy_symbols[chosen][0]
 
     """Now that we have created the new contraints for left and right, which will always be greater on the right and 
     lower on the left"""
-    left_constraints = [constraint for constraint in current_node.__get_contraints__()]
+    left_constraints = [constraint for constraint in current_node.__get_constraints__()]
     left_constraints.append(new_left_constraints)
-    right_constraints = [constraint for constraint in current_node.__get_contraints__()]
+    right_constraints = [constraint for constraint in current_node.__get_constraints__()]
     right_constraints.append(new_right_constraints)
 
     """Then we create the new node, we are just missing the result of their respective resolution which we are gonna add bellow"""
@@ -159,7 +158,7 @@ def new_constraints(current_node, chosen):
 
     """Here we compute the left and right equation, we add the respective result to the nodes and we return them"""
     left_obj = cp.Minimize(left_node.__get_objective_function__())
-    left_problem = cp.Problem(left_obj, left_node.__get_contraints__())
+    left_problem = cp.Problem(left_obj, left_node.__get_constraints__())
     left_eq_res = left_problem.solve(gp=True)
     left_values = [symbol[0].value for symbol in left_copy_symbols]
     left_node.__set_eq_result__(left_eq_res)
@@ -167,7 +166,7 @@ def new_constraints(current_node, chosen):
     left_node.__set_symbols__(left_copy_symbols)
 
     right_obj = cp.Minimize(right_node.__get_objective_function__())
-    right_problem = cp.Problem(right_obj, right_node.__get_contraints__())
+    right_problem = cp.Problem(right_obj, right_node.__get_constraints__())
     right_eq_res = right_problem.solve(gp=True)
     right_values = [symbol[0].value for symbol in right_copy_symbols]
     right_node.__set_eq_result__(right_eq_res)
@@ -177,6 +176,40 @@ def new_constraints(current_node, chosen):
     return left_node, right_node
 
 
+def respect_property(current_node):
+    for i in range(0, len(current_node.__get_symbols__())):
+        symbol, vector_associated = current_node.__get_symbols__()[i]
+        if vector_associated is None:
+            continue
+        elif len(vector_associated) == 0:
+            associated_value = current_node.__get_values__()[i]
+            floored = math.floor(associated_value)
+            ceiled = math.ceil(associated_value)
+            closest = 0
+            if abs(floored - associated_value) < abs(associated_value - ceiled):
+                closest = floored
+            else:
+                closest = ceiled
+            if abs(associated_value - closest) < abs(floored - ceiled) * 10**(-6):
+                continue
+            else:
+                return i
+        else:
+            current_value = current_node.__get_values__()[i]
+            lower_bound, upper_bound = get_closest(current_value, current_node.__get_symbols__(), i)
+            closest = 0
+            if abs(current_value - lower_bound) < abs(current_value - upper_bound):
+                closest = lower_bound
+            else:
+                closest = upper_bound
+
+            if abs(closest - current_value) < abs(lower_bound - upper_bound) * 10**(-6):
+                continue
+            else:
+                return i
+    return len(current_node.__get_symbols__())
+
+
 def branch_and_bound_solve(objective_function, contraints, symbols):
     """Here we create the objective function considering the function passed as parameter for now on we are going to focus
     on minimisation, this could be easily upgraded to both maximisation and minimisation later."""
@@ -184,24 +217,21 @@ def branch_and_bound_solve(objective_function, contraints, symbols):
     problem = cp.Problem(obj, contraints)
     eq_res = problem.solve(gp=True)
 
-    """This is just a tool to help us debug the code"""
-    print("x value is: ", symbols[0][0].value, "y value is: ", symbols[1][0].value, "z value is: ", symbols[2][0].value,
-          "the result of the equation is: ", eq_res)
-
     """Here we create the list that store the values of x, y and z gotten from the first optimization"""
-    problem_values = [symbols[0][0].value, symbols[1][0].value, symbols[2][0].value]
+    problem_values = [symbol[0].value for symbol in symbols]
 
     """We then create the root node of our tree and set his differents attributes"""
     root_node = Node()
     root_node.__set_symbols__(symbols)
-    root_node.__set_contraints__(contraints)
+    root_node.__set_constraints__(contraints)
     root_node.__set_objective_function__(objective_function)
     root_node.__set_values__(problem_values)
     root_node.__set_eq_result__(eq_res)
 
     """The best solution is going to be the final result of our main function he'll be updated through the function according
     to the branch and bound method"""
-    best_solution = root_node
+    best_solution = [numpy.Inf] * len(symbols)
+    best_eq_result = numpy.Inf
 
     """We are using a queue as the limitation of our loop, because it's arguiably one of the best data structure to represent 
     a tree."""
@@ -214,34 +244,43 @@ def branch_and_bound_solve(objective_function, contraints, symbols):
     index_variable = 0
     while not (potential_solutions.empty()):
         current_node = potential_solutions.get()
+        print("the value", end=' ')
+        for value in current_node.__get_values__():
+            print(value, end=' ')
+        print("The current value of the equation is: ", current_node.__get_eq_result__(), end=' ')
+        print()
+        index_variable = respect_property(current_node)
+        if index_variable == len(current_node.__get_symbols__()):
+            if current_node.__get_eq_result__() < best_eq_result:
+                best_eq_result = current_node.__get_eq_result__()
+                best_solution = current_node.__get_values__()
+            continue
         left_child, right_child = new_constraints(current_node, index_variable)
         if left_child is None and right_child is None:
-            index_variable += 1
-            if index_variable >= len(symbols):
-                break
-        current_node.__set_right_child__(right_child)
-        if not (left_child is None):
+            continue
+        if not (left_child is None) and not (None in left_child.__get_values__()):
             current_node.__set_left_child__(left_child)
-        if not (left_child is None) and (left_child.__get_eq_result__() < best_solution.__get_eq_result__()
-                                         or right_child.__get_eq_result__() < best_solution.__get_eq_result__()):
-            if not (left_child is None) and left_child.__get_eq_result__() < best_solution.__get_eq_result__():
-                best_solution = left_child
-            if right_child.__get_eq_result__() < best_solution.__get_eq_result__():
-                best_solution = right_child
-            if not (left_child is None) and left_child.__get_eq_result__() < best_solution.__get_eq_result__() + (
-                    0.1 * best_solution.__get_eq_result__()):
+        if not (right_child is None) and not (None in right_child.__get_values__()):
+            current_node.__set_right_child__(right_child)
+        if not (left_child is None) and not (None in left_child.__get_values__()):
+            respect_all_condition = respect_property(left_child)
+            if respect_all_condition < len(
+                    left_child.__get_symbols__()) and best_eq_result > left_child.__get_eq_result__():
                 potential_solutions.put(left_child)
-            if right_child.__get_eq_result__() < best_solution.__get_eq_result__() + (
-                    0.1 * best_solution.__get_eq_result__()):
+            else:
+                if best_eq_result > left_child.__get_eq_result__():
+                    best_eq_result = left_child.__get_eq_result__()
+                    best_solution = [values for values in left_child.__get_values__()]
+        if not (right_child is None) and not (None in right_child.__get_values__()):
+            respect_all_condition = respect_property(right_child)
+            if respect_all_condition < len(
+                    right_child.__get_symbols__()) and best_eq_result > right_child.__get_eq_result__():
                 potential_solutions.put(right_child)
-        elif index_variable < len(symbols):
-            index_variable += 1
-        """This is just a tool to help us debug the code"""
-        print("x value is: ", current_node.__get_values__()[0], "y value is: ", current_node.__get_values__()[1],
-              "z value is: ", current_node.__get_values__()[2],
-              "the result of the equation is: ", current_node.__get_eq_result__(), "for an index value of: ",
-              index_variable)
-    return best_solution
+            else:
+                if best_eq_result > right_child.__get_eq_result__():
+                    best_eq_result = right_child.__get_eq_result__()
+                    best_solution = [values for values in right_child.__get_values__()]
+    return best_solution, best_eq_result
 
 
 """Here we declare the variable using the cvxpy library, for now on the only variable usable are the one define bellow"""
@@ -249,20 +288,28 @@ x = cp.Variable(pos=True, name="x", )
 y = cp.Variable(pos=True, name="y")
 z = cp.Variable(pos=True, name="z")
 cp_objective_function = z + 35 * (x ** (-1)) + 18.5 * (y ** (-1)) + (y ** 2) + numpy.pi * (z ** (-0.5))
-"""cp_contraints = [x + (y ** 2) + (z ** (1 / 2)) <= 257, 1 * x + 7 * y + 3 * z <= 38, x <= 2.0]
-obj = cp.Minimize(cp_objective_function)
-problem = cp.Problem(obj, cp_contraints)
-res = problem.solve(solver=cp.ECOS, reltol_inacc=10 ** (-1), gp=True)
-print("x value is: ", x.value, "y value is: ", y.value,
-      "z value is: ", z.value,
-      "the result of the equation is: ", res)"""
-
 cp_contraints = [x + (y ** 2) + (z ** (1 / 2)) <= 257, 1 * x + 7 * y + 3 * z <= 38]
-cp_symbols = [(x, [1, 6, 7, 11, 13, 14, 23, 22, 53, 36]), (y, [3, 89, 90, 25, 12, 1, 23, 42, 36, 9]), (z, [])]
+cp_symbols = [(x, [1, 6, 7, 11, 13, 14, 23, 22, 53, 36]), (y, [3, 89, 90, 25, 12, 1, 23, 42, 36, 9]), (z, None)]
 
 """This is the call to the main function"""
-final_result = branch_and_bound_solve(cp_objective_function, cp_contraints, cp_symbols)
-print("x value is: ", final_result.__get_symbols__()[0][0].value, "y value is: ",
-      final_result.__get_symbols__()[1][0].value,
-      "z value is: ", final_result.__get_symbols__()[2][0].value,
-      "the result of the equation is: ", final_result.__get_eq_result__())
+final_result_value, final_result = branch_and_bound_solve(cp_objective_function, cp_contraints, cp_symbols)
+print("x value is: ", final_result_value[0], "y value is: ",
+      final_result_value[1],
+      "z value is: ", final_result_value[2],
+      "the final result of the equation is: ", final_result)
+print()
+print("////////////////////////////////////////////////////")
+print("////////////////////////////////////////////////////")
+print("///////second test with less variable///////////////")
+print("////////////////////////////////////////////////////")
+print("////////////////////////////////////////////////////")
+print()
+less_variable_function = 35 * (x ** (-1)) + 18.5 * (y ** (-1)) + (y ** 2) + numpy.pi
+less_variable_contraints = cp_contraints = [x + (y ** 2) <= 257, 1 * x + 7 * y + 3 <= 38]
+less_variable_symbols = [(x, [1, 6, 7, 11, 13, 14, 23, 22, 53, 36]), (y, [3, 89, 90, 25, 12, 1, 23, 42, 36, 9])]
+final_less_variable_value, final_less_variable_result = branch_and_bound_solve(less_variable_function,
+                                                                               less_variable_contraints,
+                                                                               less_variable_symbols)
+print("x value is: ", final_less_variable_value[0], "y value is: ",
+      final_less_variable_value[1],
+      "the final result of the equation is: ", final_less_variable_result)
