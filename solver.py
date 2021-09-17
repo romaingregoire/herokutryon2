@@ -3,6 +3,7 @@ import math
 import cvxpy as cp
 import numpy
 
+PRECISION_CONSTANT = 10 ** (-8)
 """This the class that we are going to use through the entire process it allows us to store the different result of the node but also 
 to access the values at different point in time if needed. The class is a simple binary tree that store different information:
 -The symbols of the equation x, y, z and so on
@@ -82,27 +83,6 @@ class Node:
         self.right_child = right_child
 
 
-""" def best_parameter(self):
-        best_parameter = 0
-        difference = numpy.Inf
-        if self.symbols[0].value - math.floor(self.symbols[0].value) < math.ceil(self.symbols[0].value) - self.symbols[0].value:
-            difference = self.symbols[0].value - math.floor(self.symbols[0].value)
-        else:
-            difference = math.ceil(self.symbols[0].value) - self.symbols[0].value
-        for i in range(1, len(self.symbols)):
-            floored = self.symbols[i].value - math.floor(self.symbols[i].value)
-            ceiled = math.ceil(self.symbols[i].value) - self.symbols[i].value
-            if floored < ceiled:
-                if difference > floored:
-                    best_parameter = i
-                    difference = floored
-            else:
-                if difference > ceiled:
-                    best_parameter = i
-                    difference = floored
-        return best_parameter"""
-
-
 def get_closest(value, symbols, index_variable):
     left, right = numpy.Inf, numpy.Inf
     if symbols[index_variable][1] is None:
@@ -127,6 +107,8 @@ def get_closest(value, symbols, index_variable):
 def new_constraints(current_node, chosen):
     """First of all we need to create the new contraints according to the choosen variable. To choose which variable we
     are going to use we just take them in order x -> y -> z"""
+    if chosen >= len(current_node.__get_symbols__()):
+        return None, None
     symbols = current_node.__get_symbols__()
     left_copy_symbols = [symbol for symbol in symbols]
     right_copy_symbols = [symbol for symbol in symbols]
@@ -190,7 +172,7 @@ def respect_property(current_node):
                 closest = floored
             else:
                 closest = ceiled
-            if abs(associated_value - closest) < abs(floored - ceiled) * 10 ** (-6):
+            if abs(associated_value - closest) < abs(floored - ceiled) * PRECISION_CONSTANT:
                 continue
             else:
                 return i
@@ -203,7 +185,7 @@ def respect_property(current_node):
             else:
                 closest = upper_bound
 
-            if abs(closest - current_value) < abs(lower_bound - upper_bound) * 10 ** (-6):
+            if abs(closest - current_value) < abs(lower_bound - upper_bound) * PRECISION_CONSTANT:
                 continue
             else:
                 return i
@@ -213,7 +195,7 @@ def respect_property(current_node):
 def corrected_node(current_node, index_variable):
     associated_value = current_node.__get_values__()[index_variable]
     symbol, vector_associated = current_node.__get_symbols__()[index_variable]
-    potential_symbols = [symbol for symbol in current_node.__get_symbols__()[0]]
+    potential_symbols = [symbol[0] for symbol in current_node.__get_symbols__()]
     if vector_associated is None:
         return current_node
     elif 0 <= len(vector_associated):
@@ -232,14 +214,7 @@ def corrected_node(current_node, index_variable):
                 closest = lower_bound
             else:
                 closest = upper_bound
-        added_constraints = []
-        for i in range(0, len(current_node.__get_symbols__())):
-            if i == index_variable:
-                new_eq = closest == current_node.__get_symbols__()[i][0]
-                added_constraints.append(new_eq)
-            else:
-                new_eq = current_node.__get_values__()[i] == current_node.__get_symbols__()[i][0]
-                added_constraints.append(new_eq)
+        added_constraints = [closest == current_node.__get_symbols__()[index_variable][0]]
         for constraint in current_node.__get_constraints__():
             added_constraints.append(constraint)
         obj = cp.Minimize(current_node.__get_objective_function__())
@@ -333,7 +308,12 @@ y = cp.Variable(pos=True, name="y")
 z = cp.Variable(pos=True, name="z")
 cp_objective_function = z + 35 * (x ** (-1)) + 18.5 * (y ** (-1)) + (y ** 2) + numpy.pi * (z ** (-0.5))
 cp_contraints = [x + (y ** 2) + (z ** (1 / 2)) <= 257, 1 * x + 7 * y + 3 * z <= 38]
-cp_symbols = [(x, [1, 6, 7, 11, 13, 14, 23, 22, 53, 36]), (y, [3, 89, 90, 25, 12, 1, 23, 42, 36, 9]), (z, None)]
+y_list = []
+i = 2
+while i <= 19:
+    y_list.append(i)
+    i += 0.25
+cp_symbols = [(x, [1, 4, 7, 12, 18, 36]), (y, y_list), (z, None)]
 
 """This is the call to the main function"""
 final_result_value, final_result = branch_and_bound_solve(cp_objective_function, cp_contraints, cp_symbols)
@@ -350,7 +330,7 @@ print("////////////////////////////////////////////////////")
 print()
 less_variable_function = 35 * (x ** (-1)) + 18.5 * (y ** (-1)) + (y ** 2) + numpy.pi
 less_variable_contraints = [x + (y ** 2) <= 257, 1 * x + 7 * y + 3 <= 38]
-less_variable_symbols = [(x, [1, 6, 7, 11, 13, 14, 23, 22, 53, 36]), (y, [3, 89, 90, 25, 12, 1, 23, 42, 36, 9])]
+less_variable_symbols = [(x, [1, 4, 7, 12, 18]), (y, [2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9])]
 final_less_variable_value, final_less_variable_result = branch_and_bound_solve(less_variable_function,
                                                                                less_variable_contraints,
                                                                                less_variable_symbols)
