@@ -190,7 +190,7 @@ def respect_property(current_node):
                 closest = floored
             else:
                 closest = ceiled
-            if abs(associated_value - closest) < abs(floored - ceiled) * 10**(-6):
+            if abs(associated_value - closest) < abs(floored - ceiled) * 10 ** (-6):
                 continue
             else:
                 return i
@@ -203,11 +203,51 @@ def respect_property(current_node):
             else:
                 closest = upper_bound
 
-            if abs(closest - current_value) < abs(lower_bound - upper_bound) * 10**(-6):
+            if abs(closest - current_value) < abs(lower_bound - upper_bound) * 10 ** (-6):
                 continue
             else:
                 return i
     return len(current_node.__get_symbols__())
+
+
+def corrected_node(current_node, index_variable):
+    associated_value = current_node.__get_values__()[index_variable]
+    symbol, vector_associated = current_node.__get_symbols__()[index_variable]
+    potential_symbols = [symbol for symbol in current_node.__get_symbols__()[0]]
+    if vector_associated is None:
+        return current_node
+    elif 0 <= len(vector_associated):
+        closest = 0
+        if len(vector_associated) == 0:
+            floored = math.floor(associated_value)
+            ceiled = math.ceil(associated_value)
+            if abs(floored - associated_value) < abs(associated_value - ceiled):
+                closest = floored
+            else:
+                closest = ceiled
+        else:
+            lower_bound, upper_bound = get_closest(associated_value, current_node.__get_symbols__(), index_variable)
+            closest = 0
+            if abs(associated_value - lower_bound) < abs(associated_value - upper_bound):
+                closest = lower_bound
+            else:
+                closest = upper_bound
+        added_constraints = []
+        for i in range(0, len(current_node.__get_symbols__())):
+            if i == index_variable:
+                new_eq = closest == current_node.__get_symbols__()[i][0]
+                added_constraints.append(new_eq)
+            else:
+                new_eq = current_node.__get_values__()[i] == current_node.__get_symbols__()[i][0]
+                added_constraints.append(new_eq)
+        for constraint in current_node.__get_constraints__():
+            added_constraints.append(constraint)
+        obj = cp.Minimize(current_node.__get_objective_function__())
+        copy_pb = cp.Problem(obj, added_constraints)
+        potential_new_res = copy_pb.solve(gp=True)
+        if not (potential_new_res is None) and potential_new_res < current_node.__get_eq_result__():
+            current_node.__set_values__([symbol.value for symbol in potential_symbols])
+            current_node.__set_eq_result__(potential_new_res)
 
 
 def branch_and_bound_solve(objective_function, contraints, symbols):
@@ -255,6 +295,10 @@ def branch_and_bound_solve(objective_function, contraints, symbols):
                 best_eq_result = current_node.__get_eq_result__()
                 best_solution = current_node.__get_values__()
             continue
+        else:
+            corrected_node(current_node, index_variable)
+            """We recompute the value of index variable because it's possible that the non discrete value is not the same as the previous one"""
+            index_variable = respect_property(current_node)
         left_child, right_child = new_constraints(current_node, index_variable)
         if left_child is None and right_child is None:
             continue
@@ -305,7 +349,7 @@ print("////////////////////////////////////////////////////")
 print("////////////////////////////////////////////////////")
 print()
 less_variable_function = 35 * (x ** (-1)) + 18.5 * (y ** (-1)) + (y ** 2) + numpy.pi
-less_variable_contraints = cp_contraints = [x + (y ** 2) <= 257, 1 * x + 7 * y + 3 <= 38]
+less_variable_contraints = [x + (y ** 2) <= 257, 1 * x + 7 * y + 3 <= 38]
 less_variable_symbols = [(x, [1, 6, 7, 11, 13, 14, 23, 22, 53, 36]), (y, [3, 89, 90, 25, 12, 1, 23, 42, 36, 9])]
 final_less_variable_value, final_less_variable_result = branch_and_bound_solve(less_variable_function,
                                                                                less_variable_contraints,
@@ -313,3 +357,18 @@ final_less_variable_value, final_less_variable_result = branch_and_bound_solve(l
 print("x value is: ", final_less_variable_value[0], "y value is: ",
       final_less_variable_value[1],
       "the final result of the equation is: ", final_less_variable_result)
+
+print()
+print("////////////////////////////////////////////////////")
+print("////////////////////////////////////////////////////")
+print("////////third test with less variable///////////////")
+print("////////////////////////////////////////////////////")
+print("////////////////////////////////////////////////////")
+print()
+
+test_function = x
+test_contraints = [x == 1, x >= 1]
+test_obj = cp.Minimize(test_function)
+test_pb = cp.Problem(test_obj, test_contraints)
+test_solve = test_pb.solve(gp=True)
+print("The result of double constraint with same variable is: ", test_solve)
